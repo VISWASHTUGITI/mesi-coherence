@@ -1,0 +1,122 @@
+[*]
+[*] GTKWave Signal File — MESI Coherence Protocol
+[*] Load with: gtkwave mesi_sim.vcd docs/signals.gtkw
+[*]
+
+[dumpfile] "mesi_sim.vcd"
+[dumpfile_mtime] "0"
+[dumpfile_size] 0
+[savefile] "docs/signals.gtkw"
+[timestart] 0
+
+[size] 1400 900
+[pos] 0 0
+*-26.500000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+
+[treeopen] tb_mesi_top.
+[treeopen] tb_mesi_top.dut.
+
+@28
+tb_mesi_top.clk
+tb_mesi_top.rst
+
+@28
+-
+
+@28
+-PROCESSOR 0
+tb_mesi_top.pr0_req
+tb_mesi_top.pr0_we
+@22
+tb_mesi_top.pr0_addr[7:0]
+@22
+tb_mesi_top.pr0_wdata[7:0]
+@28
+tb_mesi_top.pr0_ack
+@22
+tb_mesi_top.pr0_rdata[7:0]
+
+@28
+-
+
+@28
+-PROCESSOR 1
+tb_mesi_top.pr1_req
+tb_mesi_top.pr1_we
+@22
+tb_mesi_top.pr1_addr[7:0]
+@22
+tb_mesi_top.pr1_wdata[7:0]
+@28
+tb_mesi_top.pr1_ack
+@22
+tb_mesi_top.pr1_rdata[7:0]
+
+@28
+-
+
+@28
+-BUS SIGNALS
+@22
+tb_mesi_top.dbg_bus_phase[1:0]
+@22
+tb_mesi_top.dbg_bus_grant[1:0]
+@22
+tb_mesi_top.dbg_snoop_addr[7:0]
+@22
+tb_mesi_top.dbg_snoop_cmd[2:0]
+@28
+tb_mesi_top.dbg_any_shared
+
+@28
+-
+
+@28
+-CORE0 MESI STATES (via hierarchical ref)
+@22
+tb_mesi_top.dut.u_cache0.mesi[0][0][1:0]
+@22
+tb_mesi_top.dut.u_cache0.mesi[1][0][1:0]
+@22
+tb_mesi_top.dut.u_cache0.mesi[2][0][1:0]
+@22
+tb_mesi_top.dut.u_cache0.mesi[3][0][1:0]
+
+@28
+-
+
+@28
+-CORE1 MESI STATES
+@22
+tb_mesi_top.dut.u_cache1.mesi[0][0][1:0]
+@22
+tb_mesi_top.dut.u_cache1.mesi[1][0][1:0]
+@22
+tb_mesi_top.dut.u_cache1.mesi[2][0][1:0]
+@22
+tb_mesi_top.dut.u_cache1.mesi[3][0][1:0]
+
+@28
+-
+
+@28
+-CONTROLLER FSM STATES
+@22
+tb_mesi_top.dut.u_ctrl0.fsm_state[3:0]
+@22
+tb_mesi_top.dut.u_ctrl1.fsm_state[3:0]
+
+@28
+-
+
+@28
+-MEMORY
+@22
+tb_mesi_top.dut.u_memory.mem_fsm[2:0]
+@28
+tb_mesi_top.dut.u_memory.mem_data_valid
+@22
+tb_mesi_top.dut.u_memory.mem_data[63:0]
+
+[pattern_trace] 1
+[pattern_trace] 0

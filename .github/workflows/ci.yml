@@ -1,0 +1,58 @@
+name: MESI Coherence CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Verify iverilog version
+        run: iverilog -V
+
+      - name: Compile MESI design
+        run: |
+          iverilog -g2005 -Wall \
+            rtl/cache_array.v \
+            rtl/memory_controller.v \
+            rtl/bus_arbiter.v \
+            rtl/bus_interface.v \
+            rtl/mesi_controller.v \
+            rtl/top.v \
+            tb/tb_mesi_top.v \
+            -o mesi_sim.out
+
+      - name: Run simulation
+        run: |
+          vvp mesi_sim.out | tee sim_output.txt
+
+      - name: Check all tests passed
+        run: |
+          if grep -q "ALL TESTS PASSED" sim_output.txt; then
+            echo "SUCCESS: All MESI coherence tests passed!"
+          else
+            echo "FAILURE: Some tests failed. Check sim_output.txt"
+            cat sim_output.txt
+            exit 1
+          fi
+
+      - name: Upload simulation output
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: simulation-results
+          path: |
+            sim_output.txt
+            mesi_sim.vcd
