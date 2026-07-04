@@ -40,7 +40,7 @@ module bus_interface (
     output reg  [2:0]  mem_cmd,
     output reg  [63:0] mem_wdata,
     output reg         mem_req,
-
+    output reg [7:0] mem_resp_addr,
     // Phase output (to arbiter + debug)
     output reg  [1:0]  bus_phase,
     output reg         active_core
@@ -230,7 +230,7 @@ module bus_interface (
         mem_req   <= 1'b1;
         $display("[BUS] T=%0t | C2C Core1->Core0 data=0x%h delivered + memory writeback", $time, ctrl_bus_wdata_1);
     end
-    else if (mem_data_valid) begin
+    else if (mem_data_valid && mem_resp_addr == active_addr) begin
         // Memory response
         snoop_data       <= mem_data;
         snoop_data_ready <= 1'b1;
