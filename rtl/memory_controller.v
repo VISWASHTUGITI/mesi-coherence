@@ -7,7 +7,8 @@
 // ============================================================
 
 module memory_controller #(
-    parameter MEM_LATENCY = 10
+    parameter MEM_LATENCY   = 10,
+    parameter WB_FIFO_DEPTH = 4   // NEW: depth of the writeback buffer
 )(
     input  wire        clk,
     input  wire        rst,
@@ -48,21 +49,53 @@ module memory_controller #(
     reg [63:0]saved_wdata;
     reg [3:0] lat_count;   // counts up to MEM_LATENCY
 
-    // Writeback override: capture BusWB even when memory is busy
-    reg        wb_pending;
-    reg [7:0]  wb_addr;
-    reg [63:0] wb_data;
+    // ------------------------------------------------------------
+    // NEW: Writeback buffer (FIFO), replacing the old single-slot
+    // wb_pending/wb_addr/wb_data.
+    //
+    // Why: the old single slot could be silently overwritten if a
+    // second BusWB arrived before the first one was drained (mem_fsm
+    // still busy elsewhere). A FIFO lets multiple writebacks queue up
+    // safely instead of colliding.
+    //
+    // Priority rule: reads are latency-critical (a core is stalled
+    // waiting on them) — writebacks are not (the dirty data is already
+    // safely captured here once pushed). So MEM_IDLE always services a
+    // pending read before draining a queued writeback. Writebacks only
+    // drain during "gaps" with no read waiting, which the bus protocol
+    // above guarantees will occur (only one transaction in flight at a
+    // time, with a SNOOP window between transactions).
+    // ------------------------------------------------------------
+    localparam WB_PTR_W = $clog2(WB_FIFO_DEPTH);
+
+    reg [7:0]          wb_fifo_addr [0:WB_FIFO_DEPTH-1];
+    reg [63:0]         wb_fifo_data [0:WB_FIFO_DEPTH-1];
+    reg [WB_PTR_W-1:0] wb_head;              // read pointer
+    reg [WB_PTR_W-1:0] wb_tail;              // write pointer
+    reg [WB_PTR_W:0]   wb_count;             // entries currently queued (extra bit to count up to DEPTH)
 
     // NEW: Read override — capture BusRd/BusRdX even when memory is busy.
-    // Mirrors wb_pending below so a read request can never be silently
-    // dropped if mem_req pulses while mem_fsm is not in MEM_IDLE.
+    // Kept as a single slot (not a FIFO): the bus protocol above this
+    // module only ever allows one transaction in flight at a time, so a
+    // second read cannot legally arrive before the first is serviced.
+    // A FIFO would be extra headroom, not a correctness requirement, as
+    // long as that single-transaction serialization holds.
     reg        rd_pending;
     reg [7:0]  rd_addr;
     reg [2:0]  rd_cmd;
 
+    // NEW: combinational push/pop conditions for the FIFO. Declared as
+    // wires so wb_count/wb_head/wb_tail are each updated exactly once per
+    // cycle, correctly handling the case where a push and a pop happen on
+    // the same cycle (a new writeback arrives while an old one drains).
+    wire wb_push = mem_req && (mem_cmd == CMD_BUSWB) && (wb_count < WB_FIFO_DEPTH);
+    wire wb_pop  = (mem_fsm == MEM_IDLE) && !rd_pending && (wb_count > 0);
+
     integer b, base_addr;
 
     integer init_i;
+    integer wbf_i;   // NEW: loop var for FIFO reset
+
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             // Initialize: mem_array[i] = i
@@ -78,9 +111,16 @@ module memory_controller #(
             saved_cmd      <= CMD_IDLE;
             saved_wdata    <= 64'b0;
             lat_count      <= 4'b0;
-            wb_pending     <= 1'b0;
-            wb_addr        <= 8'b0;
-            wb_data        <= 64'b0;
+
+            // NEW: writeback FIFO reset
+            wb_head        <= 0;
+            wb_tail        <= 0;
+            wb_count       <= 0;
+            for (wbf_i = 0; wbf_i < WB_FIFO_DEPTH; wbf_i = wbf_i + 1) begin
+                wb_fifo_addr[wbf_i] <= 8'b0;
+                wb_fifo_data[wbf_i] <= 64'b0;
+            end
+
             rd_pending     <= 1'b0;   // NEW
             rd_addr        <= 8'b0;   // NEW
             rd_cmd         <= CMD_IDLE; // NEW
@@ -89,17 +129,26 @@ module memory_controller #(
             mem_data_valid <= 1'b0;
             mem_wb_ack     <= 1'b0;
 
-            // Always capture a BusWB request — even if memory is busy
-            // This handles the Modified Intervention case where the c2c
-            // writeback arrives while memory is still processing a BusRd
-            if (mem_req && mem_cmd == CMD_BUSWB) begin
-                wb_pending <= 1'b1;
-                wb_addr    <= mem_addr;
-                wb_data    <= mem_wdata;
+            // ------------------------------------------------------------
+            // NEW: push logic for the writeback FIFO. Runs unconditionally
+            // every cycle (outside the mem_fsm case), same reasoning as the
+            // original wb_pending capture — mem_req is a 1-cycle pulse and
+            // must never be missed regardless of what mem_fsm is doing.
+            //
+            // Guarded against overflow: if the FIFO is already full
+            // (wb_push stays low), the incoming writeback is dropped —
+            // visibly bounded by WB_FIFO_DEPTH, rather than silently
+            // overwriting an existing entry the way the old single-slot
+            // version could. Deepen WB_FIFO_DEPTH if this is ever hit.
+            // ------------------------------------------------------------
+            if (wb_push) begin
+                wb_fifo_addr[wb_tail] <= mem_addr;
+                wb_fifo_data[wb_tail] <= mem_wdata;
+                wb_tail <= wb_tail + 1'b1;
             end
-            // NEW: Always capture a BusRd/BusRdX request — even if memory
-            // is busy. Same reasoning as the BusWB capture above: mem_req
-            // is a 1-cycle pulse, and without this, a read arriving while
+            // Always capture a BusRd/BusRdX request — even if memory is
+            // busy. Same reasoning as the BusWB capture above: mem_req is
+            // a 1-cycle pulse, and without this, a read arriving while
             // mem_fsm is not in MEM_IDLE would be silently dropped.
             else if (mem_req && (mem_cmd == CMD_BUSRD || mem_cmd == CMD_BUSRDX)) begin
                 rd_pending <= 1'b1;
@@ -107,29 +156,45 @@ module memory_controller #(
                 rd_cmd     <= mem_cmd;
             end
 
+            // NEW: single, combined FIFO occupancy update — handles a
+            // push and a pop landing in the same cycle correctly, since
+            // wb_push/wb_pop are independent combinational conditions.
+            if (wb_push && wb_pop)
+                wb_count <= wb_count;            // one in, one out — net zero
+            else if (wb_push)
+                wb_count <= wb_count + 1'b1;
+            else if (wb_pop)
+                wb_count <= wb_count - 1'b1;
+
+            if (wb_pop)
+                wb_head <= wb_head + 1'b1;
+
             case (mem_fsm)
 
                 MEM_IDLE: begin
-                    if (wb_pending) begin
-                        // Process pending writeback from c2c intervention
-                        saved_addr  <= wb_addr;
-                        saved_cmd   <= CMD_BUSWB;
-                        saved_wdata <= wb_data;
-                        wb_pending  <= 1'b0;
-                        mem_fsm     <= MEM_WRITE;
-                    end
-                    // NEW: Process pending read captured by rd_pending above.
-                    // This replaces the old direct "mem_req is a 1-cycle
-                    // pulse — latch on rising edge" check, since rd_pending
-                    // already latched the request unconditionally and can't
-                    // be missed regardless of what mem_fsm was doing when
-                    // the pulse arrived.
-                    else if (rd_pending) begin
+                    if (rd_pending) begin
+                        // NEW: read takes priority over any queued
+                        // writeback — the processor is stalled waiting on
+                        // this, whereas writeback data is already safely
+                        // sitting in the FIFO and can wait.
                         saved_addr  <= rd_addr;
                         saved_cmd   <= rd_cmd;
                         rd_pending  <= 1'b0;
                         lat_count   <= 4'b0;
                         mem_fsm     <= MEM_DECODE;
+                    end
+                    else if (wb_pop) begin
+                        // NEW: no read waiting — safe to drain one queued
+                        // writeback from the FIFO head. (wb_pop already
+                        // encodes "mem_fsm==MEM_IDLE && !rd_pending &&
+                        // wb_count>0", so this mirrors that condition; the
+                        // pointer/count updates themselves happen in the
+                        // combined blocks above, outside this case, so
+                        // they are not duplicated here.)
+                        saved_addr  <= wb_fifo_addr[wb_head];
+                        saved_wdata <= wb_fifo_data[wb_head];
+                        saved_cmd   <= CMD_BUSWB;
+                        mem_fsm     <= MEM_WRITE;
                     end
                 end
 
