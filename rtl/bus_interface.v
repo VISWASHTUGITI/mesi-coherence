@@ -189,46 +189,55 @@ module bus_interface (
                 // BusWB and BusUpgr need no data delivery
                 // ─────────────────────────────────────────────
                 PHASE_DATA: begin
-                    snoop_valid <= 1'b0;
+    snoop_valid <= 1'b0;
 
-                    if (active_cmd == CMD_BUSWB || active_cmd == CMD_BUSUPGR) begin
-                        bus_phase <= PHASE_IDLE;
-                    end
-                    else if (c2c_valid) begin
-                        // Cache-to-cache transfer (captured during SNOOP)
-                        snoop_data       <= c2c_data;
-                        snoop_data_ready <= 1'b1;
-                        bus_phase        <= PHASE_IDLE;
-                        // Also write dirty data back to memory (Modified Intervention)
-                        // Memory was sent CMD_BUSRD — we now override with a writeback
-                        mem_addr  <= active_addr;
-                        mem_cmd   <= 3'b100; // CMD_BUSWB
-                        mem_wdata <= c2c_data;
-                        mem_req   <= 1'b1;
-                        $display("[BUS] T=%0t | C2C data=0x%h delivered + memory writeback", $time, c2c_data);
-                    end
-                    else if (ctrl_data_valid_0 && active_core == 1'b1) begin
-                        // Late c2c from core 0
-                        snoop_data       <= ctrl_bus_wdata_0;
-                        snoop_data_ready <= 1'b1;
-                        bus_phase        <= PHASE_IDLE;
-                        $display("[BUS] T=%0t | C2C Core0->Core1 data=0x%h", $time, ctrl_bus_wdata_0);
-                    end
-                    else if (ctrl_data_valid_1 && active_core == 1'b0) begin
-                        // Late c2c from core 1
-                        snoop_data       <= ctrl_bus_wdata_1;
-                        snoop_data_ready <= 1'b1;
-                        bus_phase        <= PHASE_IDLE;
-                        $display("[BUS] T=%0t | C2C Core1->Core0 data=0x%h", $time, ctrl_bus_wdata_1);
-                    end
-                    else if (mem_data_valid) begin
-                        // Memory response
-                        snoop_data       <= mem_data;
-                        snoop_data_ready <= 1'b1;
-                        bus_phase        <= PHASE_IDLE;
-                        $display("[BUS] T=%0t | Memory data=0x%h supplied", $time, mem_data);
-                    end
-                    // else: stay in PHASE_DATA waiting
+    if (active_cmd == CMD_BUSWB || active_cmd == CMD_BUSUPGR) begin
+        bus_phase <= PHASE_IDLE;
+    end
+    else if (c2c_valid) begin
+        // Cache-to-cache transfer (captured during SNOOP)
+        snoop_data       <= c2c_data;
+        snoop_data_ready <= 1'b1;
+        bus_phase        <= PHASE_IDLE;
+        // Also write dirty data back to memory (Modified Intervention)
+        mem_addr  <= active_addr;
+        mem_cmd   <= 3'b100; // CMD_BUSWB
+        mem_wdata <= c2c_data;
+        mem_req   <= 1'b1;
+        $display("[BUS] T=%0t | C2C data=0x%h delivered + memory writeback", $time, c2c_data);
+    end
+    else if (ctrl_data_valid_0 && active_core == 1'b1) begin
+        // Late c2c from core 0
+        snoop_data       <= ctrl_bus_wdata_0;
+        snoop_data_ready <= 1'b1;
+        bus_phase        <= PHASE_IDLE;
+        // Also write dirty data back to memory (Modified Intervention)
+        mem_addr  <= active_addr;
+        mem_cmd   <= 3'b100; // CMD_BUSWB
+        mem_wdata <= ctrl_bus_wdata_0;
+        mem_req   <= 1'b1;
+        $display("[BUS] T=%0t | C2C Core0->Core1 data=0x%h delivered + memory writeback", $time, ctrl_bus_wdata_0);
+    end
+    else if (ctrl_data_valid_1 && active_core == 1'b0) begin
+        // Late c2c from core 1
+        snoop_data       <= ctrl_bus_wdata_1;
+        snoop_data_ready <= 1'b1;
+        bus_phase        <= PHASE_IDLE;
+        // Also write dirty data back to memory (Modified Intervention)
+        mem_addr  <= active_addr;
+        mem_cmd   <= 3'b100; // CMD_BUSWB
+        mem_wdata <= ctrl_bus_wdata_1;
+        mem_req   <= 1'b1;
+        $display("[BUS] T=%0t | C2C Core1->Core0 data=0x%h delivered + memory writeback", $time, ctrl_bus_wdata_1);
+    end
+    else if (mem_data_valid) begin
+        // Memory response
+        snoop_data       <= mem_data;
+        snoop_data_ready <= 1'b1;
+        bus_phase        <= PHASE_IDLE;
+        $display("[BUS] T=%0t | Memory data=0x%h supplied", $time, mem_data);
+    end
+            // else: stay in PHASE_DATA waiting
                 end
 
             endcase
