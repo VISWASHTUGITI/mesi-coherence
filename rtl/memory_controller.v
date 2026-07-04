@@ -21,7 +21,10 @@ module memory_controller #(
     // To bus_interface
     output reg  [63:0] mem_data,
     output reg         mem_data_valid,
-    output reg         mem_wb_ack
+    output reg         mem_wb_ack,
+    // NEW: address tag sent back with mem_data_valid, so bus_interface
+    // can verify the response actually belongs to its active transaction
+    output reg  [7:0]  mem_resp_addr
 );
 
     localparam CMD_IDLE    = 3'b000;
@@ -50,6 +53,13 @@ module memory_controller #(
     reg [7:0]  wb_addr;
     reg [63:0] wb_data;
 
+    // NEW: Read override — capture BusRd/BusRdX even when memory is busy.
+    // Mirrors wb_pending below so a read request can never be silently
+    // dropped if mem_req pulses while mem_fsm is not in MEM_IDLE.
+    reg        rd_pending;
+    reg [7:0]  rd_addr;
+    reg [2:0]  rd_cmd;
+
     integer b, base_addr;
 
     integer init_i;
@@ -63,6 +73,7 @@ module memory_controller #(
             mem_data       <= 64'b0;
             mem_data_valid <= 1'b0;
             mem_wb_ack     <= 1'b0;
+            mem_resp_addr  <= 8'b0;   // NEW
             saved_addr     <= 8'b0;
             saved_cmd      <= CMD_IDLE;
             saved_wdata    <= 64'b0;
@@ -70,6 +81,9 @@ module memory_controller #(
             wb_pending     <= 1'b0;
             wb_addr        <= 8'b0;
             wb_data        <= 64'b0;
+            rd_pending     <= 1'b0;   // NEW
+            rd_addr        <= 8'b0;   // NEW
+            rd_cmd         <= CMD_IDLE; // NEW
         end
         else begin
             mem_data_valid <= 1'b0;
@@ -83,6 +97,15 @@ module memory_controller #(
                 wb_addr    <= mem_addr;
                 wb_data    <= mem_wdata;
             end
+            // NEW: Always capture a BusRd/BusRdX request — even if memory
+            // is busy. Same reasoning as the BusWB capture above: mem_req
+            // is a 1-cycle pulse, and without this, a read arriving while
+            // mem_fsm is not in MEM_IDLE would be silently dropped.
+            else if (mem_req && (mem_cmd == CMD_BUSRD || mem_cmd == CMD_BUSRDX)) begin
+                rd_pending <= 1'b1;
+                rd_addr    <= mem_addr;
+                rd_cmd     <= mem_cmd;
+            end
 
             case (mem_fsm)
 
@@ -95,13 +118,16 @@ module memory_controller #(
                         wb_pending  <= 1'b0;
                         mem_fsm     <= MEM_WRITE;
                     end
-                    // mem_req is a 1-cycle pulse — latch on rising edge
-                    else if (mem_req && (mem_cmd == CMD_BUSRD  ||
-                                   mem_cmd == CMD_BUSRDX ||
-                                   mem_cmd == CMD_BUSWB)) begin
-                        saved_addr  <= mem_addr;
-                        saved_cmd   <= mem_cmd;
-                        saved_wdata <= mem_wdata;
+                    // NEW: Process pending read captured by rd_pending above.
+                    // This replaces the old direct "mem_req is a 1-cycle
+                    // pulse — latch on rising edge" check, since rd_pending
+                    // already latched the request unconditionally and can't
+                    // be missed regardless of what mem_fsm was doing when
+                    // the pulse arrived.
+                    else if (rd_pending) begin
+                        saved_addr  <= rd_addr;
+                        saved_cmd   <= rd_cmd;
+                        rd_pending  <= 1'b0;
                         lat_count   <= 4'b0;
                         mem_fsm     <= MEM_DECODE;
                     end
@@ -131,6 +157,7 @@ module memory_controller #(
                             mem_data[rb*8 +: 8] <= mem_array[rbase + rb[7:0]];
                     end
                     mem_data_valid <= 1'b1;
+                    mem_resp_addr  <= saved_addr;   // NEW: tag the response with its address
 
                     // synthesis translate_off
                     $display("[MEM] T=%0t | READ  addr=0x%02h latency=%0d",
