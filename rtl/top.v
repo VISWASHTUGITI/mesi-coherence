@@ -64,6 +64,10 @@ module top (
     wire [7:0]  mem_addr; wire [2:0] mem_cmd;
     wire [63:0] mem_wdata; wire mem_req;
     wire [63:0] mem_data; wire mem_data_valid, mem_wb_ack;
+    // NEW: address tag returned by memory alongside mem_data_valid, so
+    // bus_interface can verify a response belongs to its active request
+    // before accepting it (fixes the request/response mismatch bug).
+    wire [7:0]  mem_resp_addr;
 
     // ── Instances ─────────────────────────────────────────────
 
@@ -153,6 +157,8 @@ module top (
         .snoop_valid(snoop_valid),.snoop_data(snoop_data),
         .snoop_data_ready(snoop_data_ready),.any_shared(any_shared),
         .mem_data(mem_data),.mem_data_valid(mem_data_valid),
+        // NEW: wire in memory's response address tag
+        .mem_resp_addr(mem_resp_addr),
         .mem_addr(mem_addr),.mem_cmd(mem_cmd),
         .mem_wdata(mem_wdata),.mem_req(mem_req),
         .bus_phase(bus_phase),.active_core());
@@ -168,7 +174,9 @@ module top (
         .mem_addr(mem_addr),.mem_cmd(mem_cmd),
         .mem_wdata(mem_wdata),.mem_req(mem_req),
         .mem_data(mem_data),.mem_data_valid(mem_data_valid),
-        .mem_wb_ack(mem_wb_ack));
+        .mem_wb_ack(mem_wb_ack),
+        // NEW: drive the response address tag out to bus_interface
+        .mem_resp_addr(mem_resp_addr));
 
     assign dbg_bus_phase  = bus_phase;
     assign dbg_bus_grant  = bus_grant;
