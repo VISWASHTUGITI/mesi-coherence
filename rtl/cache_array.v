@@ -9,14 +9,29 @@ module cache_array (
     input  wire        clk,
     input  wire        rst,
 
-    // Lookup port (combinational)
+    // Lookup port (combinational) — core's own pipeline
     input  wire [7:0]  lookup_addr,
     output reg         hit,
     output reg  [1:0]  hit_mesi,
     output reg         hit_way,
     output reg  [63:0] hit_data,
 
-    // Write port (sequential)
+    // NEW: Second lookup port (combinational) — dedicated to live
+    // snoop processing. Reads the exact same storage arrays as the
+    // port above, but on its own address input, so a core that is
+    // busy with its own tag check (via lookup_addr) can still answer
+    // a foreign snoop on this address the same cycle. This is just
+    // duplicated read/compare logic, not duplicated storage — no
+    // second copy of valid/mesi/tag/data is created.
+    input  wire [7:0]  snoop_lookup_addr,
+    output reg         snoop_hit,
+    output reg  [1:0]  snoop_hit_mesi,
+    output reg         snoop_hit_way,
+    output reg  [63:0] snoop_hit_data,
+
+    // Write port (sequential) — still single-ported. Arbitration
+    // between "core's own write" and "snoop-driven write" happens
+    // one level up, in mesi_controller, before reaching this port.
     input  wire        write_en,
     input  wire [7:0]  write_addr,
     input  wire        write_way,
@@ -47,13 +62,17 @@ module cache_array (
     reg [63:0] data  [0:3][0:1];
     reg        lru   [0:3];       // 0=way0 recent, 1=way1 recent
 
-    // Address decomposition
+    // Address decomposition — core's own lookup port
     wire [2:0] lookup_tag   = lookup_addr[7:5];
     wire [1:0] lookup_index = lookup_addr[4:3];
     wire [2:0] write_tag    = write_addr[7:5];
     wire [1:0] write_index  = write_addr[4:3];
 
-    // ── Combinational lookup ──────────────────────────────────
+    // NEW: Address decomposition — dedicated snoop lookup port
+    wire [2:0] snoop_tag   = snoop_lookup_addr[7:5];
+    wire [1:0] snoop_index = snoop_lookup_addr[4:3];
+
+    // ── Combinational lookup — core's own pipeline ────────────
     integer w;
     always @(*) begin
         hit      = 1'b0;
@@ -68,6 +87,28 @@ module cache_array (
                 hit_mesi = mesi[lookup_index][w];
                 hit_way  = w[0];
                 hit_data = data[lookup_index][w];
+            end
+        end
+    end
+
+    // NEW: Combinational lookup — dedicated snoop path. Identical
+    // logic to the block above, just reading the same arrays on the
+    // snoop address, so it can run every cycle independent of what
+    // the core's own FSM is doing on the port above.
+    integer sw;
+    always @(*) begin
+        snoop_hit      = 1'b0;
+        snoop_hit_mesi = INVALID;
+        snoop_hit_way  = 1'b0;
+        snoop_hit_data = 64'b0;
+        for (sw = 0; sw < 2; sw = sw + 1) begin
+            if (valid[snoop_index][sw]
+                && (tag[snoop_index][sw] == snoop_tag)
+                && (mesi[snoop_index][sw] != INVALID)) begin
+                snoop_hit      = 1'b1;
+                snoop_hit_mesi = mesi[snoop_index][sw];
+                snoop_hit_way  = sw[0];
+                snoop_hit_data = data[snoop_index][sw];
             end
         end
     end
