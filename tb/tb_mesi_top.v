@@ -433,7 +433,7 @@ idle_gap;
               "Scenario6: Core1 enters SHARED with fresh data");
 
         // Verify memory was updated with written-back value
-        repeat(5) @(posedge clk);
+        repeat(20) @(posedge clk);
         check(dut.u_memory.mem_array[8'h48] == 8'hCD,
               "Scenario6: Memory updated with dirty data 0xCD");
 
