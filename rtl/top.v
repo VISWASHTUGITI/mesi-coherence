@@ -34,6 +34,11 @@ module top (
     wire [1:0]  ca0_ev_mesi; wire [7:0] ca0_ev_addr;
     wire [63:0] ca0_ev_data;
 
+    // NEW: dedicated snoop-lookup port wires — core 0
+    wire [7:0]  ca0_snoop_lk_addr;
+    wire        ca0_snoop_hit; wire [1:0] ca0_snoop_hit_mesi;
+    wire        ca0_snoop_hit_way; wire [63:0] ca0_snoop_hit_data;
+
     // ── Cache array wires — core 1 ───────────────────────────
     wire [7:0]  ca1_lk_addr;
     wire        ca1_hit; wire [1:0] ca1_hit_mesi;
@@ -45,6 +50,11 @@ module top (
     wire [1:0]  ca1_ev_set; wire ca1_ev_way;
     wire [1:0]  ca1_ev_mesi; wire [7:0] ca1_ev_addr;
     wire [63:0] ca1_ev_data;
+
+    // NEW: dedicated snoop-lookup port wires — core 1
+    wire [7:0]  ca1_snoop_lk_addr;
+    wire        ca1_snoop_hit; wire [1:0] ca1_snoop_hit_mesi;
+    wire        ca1_snoop_hit_way; wire [63:0] ca1_snoop_hit_data;
 
     // ── Bus wires ─────────────────────────────────────────────
     wire [1:0]  ctrl_bus_req;
@@ -77,6 +87,10 @@ module top (
         .hit(ca0_hit),.hit_mesi(ca0_hit_mesi),
         .hit_way(ca0_hit_way),.hit_data(ca0_hit_data),
         .lru_way_out(ca0_lru_way),
+        // NEW: dedicated snoop-lookup port
+        .snoop_lookup_addr(ca0_snoop_lk_addr),
+        .snoop_hit(ca0_snoop_hit),.snoop_hit_mesi(ca0_snoop_hit_mesi),
+        .snoop_hit_way(ca0_snoop_hit_way),.snoop_hit_data(ca0_snoop_hit_data),
         .write_en(ca0_wr_en),.write_addr(ca0_wr_addr),
         .write_way(ca0_wr_way),.write_mesi(ca0_wr_mesi),
         .write_data(ca0_wr_data),
@@ -100,6 +114,10 @@ module top (
         .ca_hit(ca0_hit),.ca_hit_mesi(ca0_hit_mesi),
         .ca_hit_way(ca0_hit_way),.ca_hit_data(ca0_hit_data),
         .ca_lru_way(ca0_lru_way),
+        // NEW: dedicated snoop-lookup port
+        .ca_snoop_lookup_addr(ca0_snoop_lk_addr),
+        .ca_snoop_hit(ca0_snoop_hit),.ca_snoop_hit_mesi(ca0_snoop_hit_mesi),
+        .ca_snoop_hit_way(ca0_snoop_hit_way),.ca_snoop_hit_data(ca0_snoop_hit_data),
         .ca_write_en(ca0_wr_en),.ca_write_addr(ca0_wr_addr),
         .ca_write_way(ca0_wr_way),.ca_write_mesi(ca0_wr_mesi),
         .ca_write_data(ca0_wr_data),
@@ -113,6 +131,10 @@ module top (
         .hit(ca1_hit),.hit_mesi(ca1_hit_mesi),
         .hit_way(ca1_hit_way),.hit_data(ca1_hit_data),
         .lru_way_out(ca1_lru_way),
+        // NEW: dedicated snoop-lookup port
+        .snoop_lookup_addr(ca1_snoop_lk_addr),
+        .snoop_hit(ca1_snoop_hit),.snoop_hit_mesi(ca1_snoop_hit_mesi),
+        .snoop_hit_way(ca1_snoop_hit_way),.snoop_hit_data(ca1_snoop_hit_data),
         .write_en(ca1_wr_en),.write_addr(ca1_wr_addr),
         .write_way(ca1_wr_way),.write_mesi(ca1_wr_mesi),
         .write_data(ca1_wr_data),
@@ -136,6 +158,10 @@ module top (
         .ca_hit(ca1_hit),.ca_hit_mesi(ca1_hit_mesi),
         .ca_hit_way(ca1_hit_way),.ca_hit_data(ca1_hit_data),
         .ca_lru_way(ca1_lru_way),
+        // NEW: dedicated snoop-lookup port
+        .ca_snoop_lookup_addr(ca1_snoop_lk_addr),
+        .ca_snoop_hit(ca1_snoop_hit),.ca_snoop_hit_mesi(ca1_snoop_hit_mesi),
+        .ca_snoop_hit_way(ca1_snoop_hit_way),.ca_snoop_hit_data(ca1_snoop_hit_data),
         .ca_write_en(ca1_wr_en),.ca_write_addr(ca1_wr_addr),
         .ca_write_way(ca1_wr_way),.ca_write_mesi(ca1_wr_mesi),
         .ca_write_data(ca1_wr_data),
