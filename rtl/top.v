@@ -34,10 +34,13 @@ module top (
     wire [1:0]  ca0_ev_mesi; wire [7:0] ca0_ev_addr;
     wire [63:0] ca0_ev_data;
 
-    // NEW: dedicated snoop-lookup port wires — core 0
+    // dedicated snoop-lookup port wires — core 0
     wire [7:0]  ca0_snoop_lk_addr;
     wire        ca0_snoop_hit; wire [1:0] ca0_snoop_hit_mesi;
     wire        ca0_snoop_hit_way; wire [63:0] ca0_snoop_hit_data;
+
+    // NEW: free-way indicator wires — core 0
+    wire        ca0_way0_free, ca0_way1_free;
 
     // ── Cache array wires — core 1 ───────────────────────────
     wire [7:0]  ca1_lk_addr;
@@ -51,10 +54,13 @@ module top (
     wire [1:0]  ca1_ev_mesi; wire [7:0] ca1_ev_addr;
     wire [63:0] ca1_ev_data;
 
-    // NEW: dedicated snoop-lookup port wires — core 1
+    // dedicated snoop-lookup port wires — core 1
     wire [7:0]  ca1_snoop_lk_addr;
     wire        ca1_snoop_hit; wire [1:0] ca1_snoop_hit_mesi;
     wire        ca1_snoop_hit_way; wire [63:0] ca1_snoop_hit_data;
+
+    // NEW: free-way indicator wires — core 1
+    wire        ca1_way0_free, ca1_way1_free;
 
     // ── Bus wires ─────────────────────────────────────────────
     wire [1:0]  ctrl_bus_req;
@@ -74,7 +80,7 @@ module top (
     wire [7:0]  mem_addr; wire [2:0] mem_cmd;
     wire [63:0] mem_wdata; wire mem_req;
     wire [63:0] mem_data; wire mem_data_valid, mem_wb_ack;
-    // NEW: address tag returned by memory alongside mem_data_valid, so
+    // address tag returned by memory alongside mem_data_valid, so
     // bus_interface can verify a response belongs to its active request
     // before accepting it (fixes the request/response mismatch bug).
     wire [7:0]  mem_resp_addr;
@@ -87,7 +93,9 @@ module top (
         .hit(ca0_hit),.hit_mesi(ca0_hit_mesi),
         .hit_way(ca0_hit_way),.hit_data(ca0_hit_data),
         .lru_way_out(ca0_lru_way),
-        // NEW: dedicated snoop-lookup port
+        // NEW: free-way indicators
+        .way0_free(ca0_way0_free),.way1_free(ca0_way1_free),
+        // dedicated snoop-lookup port
         .snoop_lookup_addr(ca0_snoop_lk_addr),
         .snoop_hit(ca0_snoop_hit),.snoop_hit_mesi(ca0_snoop_hit_mesi),
         .snoop_hit_way(ca0_snoop_hit_way),.snoop_hit_data(ca0_snoop_hit_data),
@@ -114,7 +122,9 @@ module top (
         .ca_hit(ca0_hit),.ca_hit_mesi(ca0_hit_mesi),
         .ca_hit_way(ca0_hit_way),.ca_hit_data(ca0_hit_data),
         .ca_lru_way(ca0_lru_way),
-        // NEW: dedicated snoop-lookup port
+        // NEW: free-way indicators
+        .way0_free(ca0_way0_free),.way1_free(ca0_way1_free),
+        // dedicated snoop-lookup port
         .ca_snoop_lookup_addr(ca0_snoop_lk_addr),
         .ca_snoop_hit(ca0_snoop_hit),.ca_snoop_hit_mesi(ca0_snoop_hit_mesi),
         .ca_snoop_hit_way(ca0_snoop_hit_way),.ca_snoop_hit_data(ca0_snoop_hit_data),
@@ -131,7 +141,9 @@ module top (
         .hit(ca1_hit),.hit_mesi(ca1_hit_mesi),
         .hit_way(ca1_hit_way),.hit_data(ca1_hit_data),
         .lru_way_out(ca1_lru_way),
-        // NEW: dedicated snoop-lookup port
+        // NEW: free-way indicators
+        .way0_free(ca1_way0_free),.way1_free(ca1_way1_free),
+        // dedicated snoop-lookup port
         .snoop_lookup_addr(ca1_snoop_lk_addr),
         .snoop_hit(ca1_snoop_hit),.snoop_hit_mesi(ca1_snoop_hit_mesi),
         .snoop_hit_way(ca1_snoop_hit_way),.snoop_hit_data(ca1_snoop_hit_data),
@@ -158,7 +170,9 @@ module top (
         .ca_hit(ca1_hit),.ca_hit_mesi(ca1_hit_mesi),
         .ca_hit_way(ca1_hit_way),.ca_hit_data(ca1_hit_data),
         .ca_lru_way(ca1_lru_way),
-        // NEW: dedicated snoop-lookup port
+        // NEW: free-way indicators
+        .way0_free(ca1_way0_free),.way1_free(ca1_way1_free),
+        // dedicated snoop-lookup port
         .ca_snoop_lookup_addr(ca1_snoop_lk_addr),
         .ca_snoop_hit(ca1_snoop_hit),.ca_snoop_hit_mesi(ca1_snoop_hit_mesi),
         .ca_snoop_hit_way(ca1_snoop_hit_way),.ca_snoop_hit_data(ca1_snoop_hit_data),
@@ -183,7 +197,7 @@ module top (
         .snoop_valid(snoop_valid),.snoop_data(snoop_data),
         .snoop_data_ready(snoop_data_ready),.any_shared(any_shared),
         .mem_data(mem_data),.mem_data_valid(mem_data_valid),
-        // NEW: wire in memory's response address tag
+        // wire in memory's response address tag
         .mem_resp_addr(mem_resp_addr),
         .mem_addr(mem_addr),.mem_cmd(mem_cmd),
         .mem_wdata(mem_wdata),.mem_req(mem_req),
@@ -201,7 +215,7 @@ module top (
         .mem_wdata(mem_wdata),.mem_req(mem_req),
         .mem_data(mem_data),.mem_data_valid(mem_data_valid),
         .mem_wb_ack(mem_wb_ack),
-        // NEW: drive the response address tag out to bus_interface
+        // drive the response address tag out to bus_interface
         .mem_resp_addr(mem_resp_addr));
 
     assign dbg_bus_phase  = bus_phase;
