@@ -266,12 +266,23 @@ module mesi_controller #(
                             default: fsm_state <= FSM_WAIT_BUS;
                         endcase
                     end
-                    else begin
-                        // Miss: check if evict candidate is Modified
-                        alloc_way <= ca_lru_way;
-                        need_wb   <= (ca_evict_mesi == MODIFIED);
-                        fsm_state <= FSM_WAIT_BUS;
-                    end
+                   else begin
+    // Miss: prefer an empty way over evicting a valid one
+    if (way0_free) begin
+        alloc_way <= 1'b0;
+        need_wb   <= 1'b0;      // nothing valid there — no eviction needed
+    end
+    else if (way1_free) begin
+        alloc_way <= 1'b1;
+        need_wb   <= 1'b0;
+    end
+    else begin
+        // Both ways occupied — fall back to LRU-based eviction
+        alloc_way <= ca_lru_way;
+        need_wb   <= (ca_evict_mesi == MODIFIED);
+    end
+    fsm_state <= FSM_WAIT_BUS;
+end
                 end
 
                 FSM_WAIT_BUS: begin
