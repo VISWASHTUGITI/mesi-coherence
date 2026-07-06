@@ -16,7 +16,14 @@ module cache_array (
     output reg         hit_way,
     output reg  [63:0] hit_data,
 
-    // NEW: Second lookup port (combinational) — dedicated to live
+    // NEW: Free-way indicators for the SET currently addressed by
+    // lookup_addr. Lets the controller prefer an empty way over
+    // evicting a valid line on a miss, instead of blindly following
+    // LRU regardless of whether a free way already exists.
+    output wire        way0_free,
+    output wire        way1_free,
+
+    // Second lookup port (combinational) — dedicated to live
     // snoop processing. Reads the exact same storage arrays as the
     // port above, but on its own address input, so a core that is
     // busy with its own tag check (via lookup_addr) can still answer
@@ -68,9 +75,15 @@ module cache_array (
     wire [2:0] write_tag    = write_addr[7:5];
     wire [1:0] write_index  = write_addr[4:3];
 
-    // NEW: Address decomposition — dedicated snoop lookup port
+    // Address decomposition — dedicated snoop lookup port
     wire [2:0] snoop_tag   = snoop_lookup_addr[7:5];
     wire [1:0] snoop_index = snoop_lookup_addr[4:3];
+
+    // NEW: Free-way check for the set currently under the core's own
+    // lookup_addr — purely combinational, reads the same valid[] bits
+    // the hit-detection loop below already uses.
+    assign way0_free = ~valid[lookup_index][0];
+    assign way1_free = ~valid[lookup_index][1];
 
     // ── Combinational lookup — core's own pipeline ────────────
     integer w;
@@ -91,7 +104,7 @@ module cache_array (
         end
     end
 
-    // NEW: Combinational lookup — dedicated snoop path. Identical
+    // Combinational lookup — dedicated snoop path. Identical
     // logic to the block above, just reading the same arrays on the
     // snoop address, so it can run every cycle independent of what
     // the core's own FSM is doing on the port above.
@@ -114,6 +127,9 @@ module cache_array (
     end
 
     // LRU way: if lru[index]=0 → way0 was recent → evict way1; else evict way0
+    // NOTE: this is only consulted by mesi_controller when NEITHER way is
+    // free (see way0_free/way1_free above) — it is the fallback policy,
+    // not the first choice, after the fix.
     assign lru_way_out = ~lru[lookup_index];
 
     // ── Sequential write ──────────────────────────────────────
