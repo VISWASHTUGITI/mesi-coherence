@@ -44,7 +44,14 @@ module mesi_controller #(
     input  wire [63:0] ca_hit_data,
     input  wire        ca_lru_way,
 
-    // NEW: Cache array interface — dedicated snoop lookup port.
+    // NEW: Free-way indicators for the set under ca_lookup_addr.
+    // Used on a miss to prefer an empty way over evicting a valid
+    // line, instead of blindly following ca_lru_way regardless of
+    // whether a free way already exists in this set.
+    input  wire        way0_free,
+    input  wire        way1_free,
+
+    // Cache array interface — dedicated snoop lookup port.
     // Always driven live with snoop_addr; lets this core answer a
     // foreign snoop with a cache lookup even while fsm_state is busy
     // servicing its own request on the port above.
@@ -83,14 +90,13 @@ module mesi_controller #(
     localparam CMD_BUSWB   = 3'b100;
 
     // Controller FSM states
-    // REMOVED (superseded by the state-independent snoop logic below):
-    // FSM_SNOOP_PROC, FSM_SNOOP_RESUME. Snoop response — both the data
-    // supply AND the MESI state write — is now handled live, every
-    // cycle, independent of fsm_state, using the dedicated snoop port.
-    // The old approach deferred a busy core's snoop response until it
-    // returned to IDLE, which was too late for the data-supply half of
-    // the job (the live snoop window in bus_interface only lasts a few
-    // cycles) — that was the bug we traced and are fixing here.
+    // Snoop response — both the data supply AND the MESI state write —
+    // is handled live, every cycle, independent of fsm_state, using the
+    // dedicated snoop port (see below). The old FSM_SNOOP_PROC /
+    // FSM_SNOOP_RESUME / snoop_pending mechanism has been removed;
+    // deferring a busy core's snoop response was too late for the
+    // data-supply half of the job (the live snoop window in
+    // bus_interface only lasts a few cycles).
     localparam FSM_IDLE         = 4'd0;
     localparam FSM_TAG_CHECK    = 4'd1;
     localparam FSM_WAIT_BUS     = 4'd2;
@@ -114,12 +120,28 @@ module mesi_controller #(
     wire foreign_snoop = snoop_valid && !bus_grant;
 
     // ------------------------------------------------------------
-    // NEW: State-independent snoop response — data-supply half.
+    // NEW: Free-way-preferred allocation decision for a miss.
     //
-    // This is the fix for the bug where a core busy in FSM_WAIT_BUS
-    // (waiting for its own grant) could not answer another core's
-    // snoop in time, because the old design only processed snoops
-    // from FSM_IDLE/FSM_SNOOP_PROC/FSM_SNOOP_RESUME.
+    // This is the fix for the bug where FSM_TAG_CHECK's miss branch
+    // went straight to ca_lru_way with no check for whether a way in
+    // this set is simply empty — a purely-history-based LRU bit can
+    // point at an occupied way even when the other way is free,
+    // causing an unnecessary eviction (and unnecessary writeback if
+    // that evicted line happened to be Modified).
+    //
+    // Priority: an empty way always wins over LRU. LRU is only the
+    // fallback when BOTH ways are already occupied.
+    // ------------------------------------------------------------
+    wire pick_way0_free = way0_free;
+    wire pick_way1_free = !way0_free && way1_free;
+    wire pick_lru        = !way0_free && !way1_free;
+
+    wire tag_check_alloc_way = pick_way0_free ? 1'b0 :
+                                pick_way1_free ? 1'b1 :
+                                ca_lru_way;
+
+    // ------------------------------------------------------------
+    // State-independent snoop response — data-supply half.
     //
     // ca_snoop_lookup_addr is always driven with snoop_addr, live,
     // every cycle — this uses cache_array's dedicated snoop port, so
@@ -128,11 +150,11 @@ module mesi_controller #(
     // ------------------------------------------------------------
     assign ca_snoop_lookup_addr = snoop_addr;
 
-    // NEW: does a live snoop need a response from this cache, right now,
+    // Does a live snoop need a response from this cache, right now,
     // regardless of fsm_state?
     wire snoop_live_hit = foreign_snoop && ca_snoop_hit;
 
-    // NEW: what the snoop response wants to write into the cache (state
+    // What the snoop response wants to write into the cache (state
     // update), computed combinationally, live. This does NOT yet decide
     // whether it actually gets to write this cycle — that arbitration
     // happens further down against the core's own FSM_UPDATE_CACHE write.
@@ -204,7 +226,7 @@ module mesi_controller #(
         end
     end
 
-    // NEW: does the snoop actually want the write port THIS cycle?
+    // Does the snoop actually want the write port THIS cycle?
     // Used both to arbitrate the write port and to tell the core's own
     // FSM_UPDATE_CACHE whether it must stall and retry.
     wire snoop_wants_write = snoop_wr_en;
@@ -266,23 +288,19 @@ module mesi_controller #(
                             default: fsm_state <= FSM_WAIT_BUS;
                         endcase
                     end
-                   else begin
-    // Miss: prefer an empty way over evicting a valid one
-    if (way0_free) begin
-        alloc_way <= 1'b0;
-        need_wb   <= 1'b0;      // nothing valid there — no eviction needed
-    end
-    else if (way1_free) begin
-        alloc_way <= 1'b1;
-        need_wb   <= 1'b0;
-    end
-    else begin
-        // Both ways occupied — fall back to LRU-based eviction
-        alloc_way <= ca_lru_way;
-        need_wb   <= (ca_evict_mesi == MODIFIED);
-    end
-    fsm_state <= FSM_WAIT_BUS;
-end
+                    else begin
+                        // NEW: Miss — prefer an empty way over evicting a
+                        // valid one. tag_check_alloc_way already encodes
+                        // "free way if one exists, else ca_lru_way" (see
+                        // the combinational block above). need_wb is only
+                        // asserted when we're actually falling back to
+                        // LRU eviction (pick_lru) AND that way is Modified
+                        // — a free way never needs a writeback, since
+                        // there's nothing valid there to save.
+                        alloc_way <= tag_check_alloc_way;
+                        need_wb   <= pick_lru && (ca_evict_mesi == MODIFIED);
+                        fsm_state <= FSM_WAIT_BUS;
+                    end
                 end
 
                 FSM_WAIT_BUS: begin
@@ -320,7 +338,7 @@ end
                 end
 
                 FSM_UPDATE_CACHE: begin
-                    // NEW: write-port priority + stall-and-retry.
+                    // Write-port priority + stall-and-retry.
                     // A live snoop write always wins the write port (it
                     // has a hard deadline — the live snoop window — the
                     // core's own write does not). If the snoop wants the
@@ -360,12 +378,6 @@ end
         ca_evict_set    = saved_addr[4:3];
         ca_evict_way    = alloc_way;
 
-        // NEW: core's own desired write, computed as "what
-        // FSM_UPDATE_CACHE would want", independent of whether it
-        // actually wins the port below.
-        // (kept as plain regs here so the priority mux below reads
-        // cleanly)
-
         case (fsm_state)
 
             FSM_IDLE: begin
@@ -374,6 +386,14 @@ end
 
             FSM_TAG_CHECK: begin
                 ca_lookup_addr = saved_addr;
+                // NEW: drive ca_evict_way from the SAME-cycle allocation
+                // decision (tag_check_alloc_way), not the stale, previous
+                // transaction's alloc_way register. This ensures
+                // ca_evict_mesi (read combinationally via evict_set/
+                // evict_way) reflects the way we are actually about to
+                // use, so need_wb's decision in the sequential block
+                // above is based on the correct candidate.
+                ca_evict_way = tag_check_alloc_way;
             end
 
             FSM_WAIT_BUS: begin
@@ -418,16 +438,12 @@ end
         endcase
 
         // ------------------------------------------------------------
-        // NEW: bus_data_valid / bus_wdata / bus_shared — live snoop
-        // response overrides whatever the case block above set (the
+        // bus_data_valid / bus_wdata / bus_shared — live snoop
+        // response overrides whatever the case block above set. The
         // case block never sets these for anything other than the
-        // FSM_WAIT_BUS writeback path, so there is no real conflict:
-        // a core issuing its own writeback and being asked to answer a
-        // snoop in the same cycle both want these same three wires, but
-        // that specific collision — one core doing a writeback while
-        // simultaneously being snooped — still needs the snoop to win,
-        // since the snoop's deadline is harder. So this override is
-        // unconditional whenever a live snoop needs an answer.
+        // FSM_WAIT_BUS writeback path, so the only real collision is a
+        // core issuing its own writeback while simultaneously being
+        // snooped — the snoop still wins, since its deadline is harder.
         // ------------------------------------------------------------
         if (snoop_live_hit && (snoop_bus_data_valid || snoop_bus_shared)) begin
             bus_data_valid = snoop_bus_data_valid;
@@ -436,7 +452,7 @@ end
         end
 
         // ------------------------------------------------------------
-        // NEW: write-port priority mux. Snoop write wins outright; the
+        // Write-port priority mux. Snoop write wins outright; the
         // core's own FSM_UPDATE_CACHE write only reaches the port when
         // no live snoop write is pending this cycle. FSM_UPDATE_CACHE's
         // sequential block (above) already knows to stall and retry
